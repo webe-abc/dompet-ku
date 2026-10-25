@@ -31,14 +31,28 @@ export default function Home() {
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
 
-  // Set nilai tanggal default di sisi browser (mencegah error prerender Next.js)
+  // Set nilai tanggal default di browser
   useEffect(() => {
     const today = new Date().toISOString();
     setDate(today.split('T')[0]);
     setSelectedMonth(today.slice(0, 7));
   }, []);
 
-  // Tarik data transaksi dengan filter
+  // Tarik data modal awal dari database Supabase
+  const fetchBudget = async () => {
+    const { data, error } = await supabase
+      .from('settings')
+      .select('value')
+      .eq('id', 'initial_budget')
+      .maybeSingle();
+
+    if (!error && data) {
+      setInitialBudget(Number(data.value) || 0);
+      setTempBudget(data.value);
+    }
+  };
+
+  // Tarik riwayat transaksi
   const fetchTransactions = useCallback(async () => {
     let query = supabase.from('transactions').select('*').order('date', { ascending: false });
 
@@ -59,19 +73,22 @@ export default function Home() {
 
   useEffect(() => {
     fetchTransactions();
-    const saved = localStorage.getItem('initial_budget');
-    if (saved) {
-      setInitialBudget(Number(saved));
-      setTempBudget(saved);
-    }
+    fetchBudget();
   }, [fetchTransactions]);
 
-  const handleSaveBudget = (e: React.FormEvent) => {
+  // Simpan perubahan modal langsung ke Supabase
+  const handleSaveBudget = async (e: React.FormEvent) => {
     e.preventDefault();
     const val = Number(tempBudget) || 0;
-    setInitialBudget(val);
-    localStorage.setItem('initial_budget', val.toString());
-    setIsEditingBudget(false);
+
+    const { error } = await supabase
+      .from('settings')
+      .upsert({ id: 'initial_budget', value: val.toString() });
+
+    if (!error) {
+      setInitialBudget(val);
+      setIsEditingBudget(false);
+    }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -149,7 +166,7 @@ export default function Home() {
         <span>{showAddForm ? '✕ Tutup Form' : '+ Catat Pengeluaran Baru'}</span>
       </button>
 
-      {/* Form Tambah Pengeluaran (Kompak) */}
+      {/* Form Tambah Pengeluaran */}
       {showAddForm && (
         <form onSubmit={handleSubmit} className="bg-slate-900 border border-slate-800 p-4 rounded-3xl space-y-3">
           <input
