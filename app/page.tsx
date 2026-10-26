@@ -11,21 +11,29 @@ interface Transaction {
   date: string;
 }
 
+interface BudgetPeriod {
+  id: string;
+  name: string;
+  amount: number;
+  start_date: string;
+  end_date: string;
+  is_active?: boolean;
+}
+
 export default function Home() {
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   
-  // State Modal (Nama, Nominal, & Rentang Waktu)
-  const [budgetName, setBudgetName] = useState<string>('Modal Gaji');
-  const [initialBudget, setInitialBudget] = useState<number>(0);
-  const [budgetStart, setBudgetStart] = useState<string>('');
-  const [budgetEnd, setBudgetEnd] = useState<string>('');
+  // State Daftar Modal & Modal Aktif
+  const [budgets, setBudgets] = useState<BudgetPeriod[]>([]);
+  const [activeBudgetId, setActiveBudgetId] = useState<string>('');
   
-  // State Sementara untuk Form Atur Modal
-  const [tempName, setTempName] = useState<string>('');
-  const [tempBudget, setTempBudget] = useState<string>('');
-  const [tempStart, setTempStart] = useState<string>('');
-  const [tempEnd, setTempEnd] = useState<string>('');
+  // State Form Edit/Tambah Modal
   const [isEditingBudget, setIsEditingBudget] = useState(false);
+  const [isCreatingNewBudget, setIsCreatingNewBudget] = useState(false);
+  const [formName, setFormName] = useState('');
+  const [formAmount, setFormAmount] = useState('');
+  const [formStart, setFormStart] = useState('');
+  const [formEnd, setFormEnd] = useState('');
 
   // Form input transaksi baru
   const [showAddForm, setShowAddForm] = useState(false);
@@ -35,48 +43,42 @@ export default function Home() {
   const [date, setDate] = useState('');
   const [loading, setLoading] = useState(false);
 
-  // State untuk Edit Transaksi
+  // State Edit Transaksi
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editTitle, setEditTitle] = useState('');
   const [editAmount, setEditAmount] = useState('');
   const [editCategory, setEditCategory] = useState('Makanan');
   const [editDate, setEditDate] = useState('');
 
-  // Filter Riwayat Transaksi
+  // Filter Riwayat
   const [filterMode, setFilterMode] = useState<'all' | 'month' | 'custom'>('all');
   const [selectedMonth, setSelectedMonth] = useState('');
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
 
-  // Inisialisasi tanggal default di sisi browser (bebas error prerender)
+  // Set tanggal default aman prerender
   useEffect(() => {
     const today = new Date().toISOString().split('T')[0];
     setDate(today);
     setSelectedMonth(today.slice(0, 7));
   }, []);
 
-  // Tarik data modal aktif dari Supabase
-  const fetchBudgetPeriod = async () => {
+  // Tarik semua daftar modal dari Supabase
+  const fetchBudgets = async () => {
     const { data, error } = await supabase
       .from('budget_periods')
       .select('*')
-      .eq('id', 'active_budget')
-      .maybeSingle();
+      .order('start_date', { ascending: false });
 
-    if (!error && data) {
-      setBudgetName(data.name || 'Modal Gaji');
-      setInitialBudget(Number(data.amount) || 0);
-      setBudgetStart(data.start_date || '');
-      setBudgetEnd(data.end_date || '');
-
-      setTempName(data.name || 'Modal Gaji');
-      setTempBudget(data.amount ? data.amount.toString() : '');
-      setTempStart(data.start_date || '');
-      setTempEnd(data.end_date || '');
+    if (!error && data && data.length > 0) {
+      setBudgets(data);
+      // Cari modal yang aktif, atau pilih urutan pertama
+      const active = data.find((b) => b.is_active) || data[0];
+      setActiveBudgetId(active.id);
     }
   };
 
-  // Tarik daftar riwayat transaksi
+  // Tarik riwayat transaksi
   const fetchTransactions = useCallback(async () => {
     let query = supabase.from('transactions').select('*').order('date', { ascending: false });
 
@@ -97,34 +99,92 @@ export default function Home() {
 
   useEffect(() => {
     fetchTransactions();
-    fetchBudgetPeriod();
+    fetchBudgets();
   }, [fetchTransactions]);
 
-  // Simpan perubahan nama, nominal, dan tanggal modal ke Supabase
-  const handleSaveBudget = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const val = Number(tempBudget) || 0;
-    if (!tempName.trim()) return alert('Masukkan sub nama modal (misal: Modal Gaji Oktober)');
-    if (!tempStart || !tempEnd) return alert('Pilih tanggal mulai dan tanggal selesai');
+  // Modal yang sedang aktif saat ini
+  const currentBudget = budgets.find((b) => b.id === activeBudgetId);
 
-    const { error } = await supabase.from('budget_periods').upsert({
-      id: 'active_budget',
-      name: tempName.trim(),
-      amount: val,
-      start_date: tempStart,
-      end_date: tempEnd,
-    });
+  // Fungsi ganti / switch modal aktif
+  const handleSwitchBudget = async (id: string) => {
+    if (id === 'NEW_BUDGET') {
+      // Buka form tambah modal baru
+      const today = new Date().toISOString().split('T')[0];
+      setFormName('');
+      setFormAmount('');
+      setFormStart(today);
+      setFormEnd(today);
+      setIsCreatingNewBudget(true);
+      setIsEditingBudget(true);
+      return;
+    }
+
+    setActiveBudgetId(id);
+    setIsEditingBudget(false);
+    setIsCreatingNewBudget(false);
+
+    // Update status aktif ke Supabase agar tersinkron di perangkat lain
+    await supabase.from('budget_periods').update({ is_active: false }).neq('id', id);
+    await supabase.from('budget_periods').update({ is_active: true }).eq('id', id);
+  };
+
+  // Buka form edit untuk modal yang sedang aktif
+  const handleOpenEdit = () => {
+    if (!currentBudget) return;
+    setFormName(currentBudget.name);
+    setFormAmount(currentBudget.amount.toString());
+    setFormStart(currentBudget.start_date);
+    setFormEnd(currentBudget.end_date);
+    setIsCreatingNewBudget(false);
+    setIsEditingBudget(!isEditingBudget);
+  };
+
+  // Simpan perubahan edit atau penambahan modal baru
+  const handleSaveBudgetForm = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!formName.trim() || !formStart || !formEnd) {
+      return alert('Lengkapi nama modal dan rentang tanggalnya.');
+    }
+
+    const targetId = isCreatingNewBudget ? `budget_${Date.now()}` : activeBudgetId;
+    const newBudgetPayload = {
+      id: targetId,
+      name: formName.trim(),
+      amount: Number(formAmount) || 0,
+      start_date: formStart,
+      end_date: formEnd,
+      is_active: true,
+    };
+
+    // Jadikan modal lain tidak aktif
+    await supabase.from('budget_periods').update({ is_active: false }).neq('id', targetId);
+    
+    // Simpan modal ini
+    const { error } = await supabase.from('budget_periods').upsert(newBudgetPayload);
 
     if (!error) {
-      setBudgetName(tempName.trim());
-      setInitialBudget(val);
-      setBudgetStart(tempStart);
-      setBudgetEnd(tempEnd);
+      await fetchBudgets();
+      setActiveBudgetId(targetId);
       setIsEditingBudget(false);
+      setIsCreatingNewBudget(false);
     }
   };
 
-  // Simpan transaksi baru
+  // Hapus modal yang sedang aktif
+  const handleDeleteBudget = async () => {
+    if (budgets.length <= 1) {
+      return alert('Minimal harus ada satu modal tersimpan.');
+    }
+    if (!confirm(`Hapus modal "${currentBudget?.name}"?`)) return;
+
+    const { error } = await supabase.from('budget_periods').delete().eq('id', activeBudgetId);
+    if (!error) {
+      setIsEditingBudget(false);
+      await fetchBudgets();
+    }
+  };
+
+  // Transaksi Tambah
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!title || !amount || !date) return;
@@ -143,15 +203,15 @@ export default function Home() {
     }
   };
 
-  // Hapus transaksi
-  const handleDelete = async (id: number) => {
+  // Transaksi Hapus
+  const handleDeleteTransaction = async (id: number) => {
     if (!confirm('Hapus transaksi ini?')) return;
     const { error } = await supabase.from('transactions').delete().eq('id', id);
     if (!error) fetchTransactions();
   };
 
-  // Masuk mode edit transaksi
-  const startEditing = (t: Transaction) => {
+  // Transaksi Edit
+  const startEditingTransaction = (t: Transaction) => {
     setEditingId(t.id);
     setEditTitle(t.title);
     setEditAmount(t.amount.toString());
@@ -159,8 +219,7 @@ export default function Home() {
     setEditDate(t.date);
   };
 
-  // Simpan update transaksi
-  const handleUpdate = async (e: React.FormEvent, id: number) => {
+  const handleUpdateTransaction = async (e: React.FormEvent, id: number) => {
     e.preventDefault();
     if (!editTitle || !editAmount) return;
 
@@ -180,55 +239,70 @@ export default function Home() {
     }
   };
 
-  // Hitung pengeluaran HANYA yang tanggalnya masuk ke rentang waktu modal
+  // Hitung pengeluaran khusus periode modal yang sedang dipilih
   const pengeluaranModalAktif = transactions
     .filter((t) => {
-      if (!budgetStart || !budgetEnd) return true;
-      return t.date >= budgetStart && t.date <= budgetEnd;
+      if (!currentBudget?.start_date || !currentBudget?.end_date) return true;
+      return t.date >= currentBudget.start_date && t.date <= currentBudget.end_date;
     })
     .reduce((acc, curr) => acc + Number(curr.amount), 0);
 
-  const sisaSaldo = initialBudget - pengeluaranModalAktif;
+  const budgetAmount = currentBudget ? Number(currentBudget.amount) : 0;
+  const sisaSaldo = budgetAmount - pengeluaranModalAktif;
 
   return (
     <main className="max-w-sm mx-auto p-4 space-y-4 min-h-screen text-slate-100 font-sans">
-      {/* Kartu Ringkasan Modal & Rentang Periode */}
+      {/* Kartu Ringkasan Modal & Switcher */}
       <div className="bg-slate-900 border border-slate-800 rounded-3xl p-5 space-y-4 shadow-sm">
-        <div className="flex justify-between items-start gap-2">
-          <div>
-            <div className="flex items-center gap-1.5 flex-wrap">
-              <span className="text-[10px] font-bold bg-blue-950 text-blue-300 border border-blue-800/60 px-2 py-0.5 rounded-md uppercase tracking-wide">
-                {budgetName}
-              </span>
-            </div>
-            <p className="text-[11px] font-bold text-slate-400 tracking-wider uppercase mt-1">Sisa Saldo</p>
-            <h1 className={`text-2xl font-black mt-0.5 ${sisaSaldo < 0 ? 'text-rose-400' : 'text-emerald-400'}`}>
-              Rp {sisaSaldo.toLocaleString('id-ID')}
-            </h1>
-            {budgetStart && budgetEnd && (
-              <p className="text-[10px] text-slate-400 mt-1">
-                Periode: <span className="text-slate-300 font-medium">{budgetStart}</span> s/d <span className="text-slate-300 font-medium">{budgetEnd}</span>
-              </p>
-            )}
-          </div>
-          <button
-            onClick={() => setIsEditingBudget(!isEditingBudget)}
-            className="text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 px-3 py-1.5 rounded-full border border-slate-700 transition shrink-0"
+        
+        {/* Switcher Dropdown Modal */}
+        <div className="flex items-center gap-2">
+          <select
+            value={activeBudgetId}
+            onChange={(e) => handleSwitchBudget(e.target.value)}
+            className="flex-1 bg-slate-950 border border-blue-900/60 text-blue-300 font-bold text-xs px-3 py-2 rounded-xl focus:outline-none focus:border-blue-500"
           >
-            {isEditingBudget ? 'Batal' : 'Atur Modal'}
+            {budgets.map((b) => (
+              <option key={b.id} value={b.id}>
+                {b.name} (Rp {Number(b.amount).toLocaleString('id-ID')})
+              </option>
+            ))}
+            <option value="NEW_BUDGET">+ Tambah Modal Baru...</option>
+          </select>
+
+          <button
+            onClick={handleOpenEdit}
+            className="text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 px-3 py-2 rounded-xl border border-slate-700 transition"
+          >
+            {isEditingBudget ? 'Batal' : 'Edit Modal'}
           </button>
         </div>
 
-        {/* Form Edit Modal, Sub-Nama, dan Tanggal Mulai/Selesai */}
+        <div>
+          <p className="text-[11px] font-bold text-slate-400 tracking-wider uppercase">Sisa Saldo</p>
+          <h1 className={`text-2xl font-black mt-0.5 ${sisaSaldo < 0 ? 'text-rose-400' : 'text-emerald-400'}`}>
+            Rp {sisaSaldo.toLocaleString('id-ID')}
+          </h1>
+          {currentBudget && (
+            <p className="text-[10px] text-slate-400 mt-1">
+              Periode: <span className="text-slate-300 font-medium">{currentBudget.start_date}</span> s/d <span className="text-slate-300 font-medium">{currentBudget.end_date}</span>
+            </p>
+          )}
+        </div>
+
+        {/* Form Atur / Edit / Tambah Modal */}
         {isEditingBudget && (
-          <form onSubmit={handleSaveBudget} className="bg-slate-950 p-3.5 rounded-2xl border border-slate-800 space-y-2.5">
+          <form onSubmit={handleSaveBudgetForm} className="bg-slate-950 p-3.5 rounded-2xl border border-slate-800 space-y-2.5">
+            <p className="text-xs font-bold text-blue-400">
+              {isCreatingNewBudget ? 'Tambah Modal Baru' : 'Edit Modal Ini'}
+            </p>
             <div>
-              <label className="text-[10px] text-slate-400 block mb-1">Sub Nama Modal</label>
+              <label className="text-[10px] text-slate-400 block mb-1">Nama Modal</label>
               <input
                 type="text"
-                placeholder="Contoh: Modal Gaji Oktober"
-                value={tempName}
-                onChange={(e) => setTempName(e.target.value)}
+                placeholder="Contoh: Modal Gaji November"
+                value={formName}
+                onChange={(e) => setFormName(e.target.value)}
                 className="w-full bg-slate-900 border border-slate-700 text-white px-2.5 py-1.5 rounded-xl text-xs focus:outline-none focus:border-blue-500"
               />
             </div>
@@ -236,9 +310,9 @@ export default function Home() {
               <label className="text-[10px] text-slate-400 block mb-1">Nominal Modal (Rp)</label>
               <input
                 type="number"
-                placeholder="Masukkan nominal..."
-                value={tempBudget}
-                onChange={(e) => setTempBudget(e.target.value)}
+                placeholder="Contoh: 3000000"
+                value={formAmount}
+                onChange={(e) => setFormAmount(e.target.value)}
                 className="w-full bg-slate-900 border border-slate-700 text-white px-2.5 py-1.5 rounded-xl text-xs focus:outline-none focus:border-blue-500"
               />
             </div>
@@ -247,8 +321,8 @@ export default function Home() {
                 <label className="text-[10px] text-slate-400 block mb-1">Mulai Pakai</label>
                 <input
                   type="date"
-                  value={tempStart}
-                  onChange={(e) => setTempStart(e.target.value)}
+                  value={formStart}
+                  onChange={(e) => setFormStart(e.target.value)}
                   className="w-full bg-slate-900 border border-slate-700 text-white px-2 py-1 rounded-xl text-xs focus:outline-none focus:border-blue-500"
                 />
               </div>
@@ -256,22 +330,37 @@ export default function Home() {
                 <label className="text-[10px] text-slate-400 block mb-1">Selesai Pakai</label>
                 <input
                   type="date"
-                  value={tempEnd}
-                  onChange={(e) => setTempEnd(e.target.value)}
+                  value={formEnd}
+                  onChange={(e) => setFormEnd(e.target.value)}
                   className="w-full bg-slate-900 border border-slate-700 text-white px-2 py-1 rounded-xl text-xs focus:outline-none focus:border-blue-500"
                 />
               </div>
             </div>
-            <button type="submit" className="w-full bg-blue-600 hover:bg-blue-500 text-white py-1.5 rounded-xl text-xs font-semibold">
-              Simpan Periode Modal
-            </button>
+            
+            <div className="flex gap-2 pt-1">
+              {!isCreatingNewBudget && budgets.length > 1 && (
+                <button
+                  type="button"
+                  onClick={handleDeleteBudget}
+                  className="bg-rose-950 text-rose-300 border border-rose-800/60 px-3 py-1.5 rounded-xl text-xs font-medium hover:bg-rose-900 transition"
+                >
+                  Hapus
+                </button>
+              )}
+              <button
+                type="submit"
+                className="flex-1 bg-blue-600 hover:bg-blue-500 text-white py-1.5 rounded-xl text-xs font-semibold"
+              >
+                {isCreatingNewBudget ? 'Simpan Modal Baru' : 'Simpan Perubahan'}
+              </button>
+            </div>
           </form>
         )}
 
         <div className="grid grid-cols-2 gap-2 pt-3 border-t border-slate-800/80 text-xs">
           <div>
             <span className="text-slate-400">Modal: </span>
-            <span className="font-semibold text-slate-200">Rp {initialBudget.toLocaleString('id-ID')}</span>
+            <span className="font-semibold text-slate-200">Rp {budgetAmount.toLocaleString('id-ID')}</span>
           </div>
           <div className="text-right">
             <span className="text-slate-400">Terpakai: </span>
@@ -280,7 +369,7 @@ export default function Home() {
         </div>
       </div>
 
-      {/* Tombol Buka/Tutup Form Tambah Transaksi */}
+      {/* Tombol Buka/Tutup Form Transaksi */}
       <button
         onClick={() => setShowAddForm(!showAddForm)}
         className="w-full bg-blue-600 hover:bg-blue-500 active:scale-[0.99] text-white py-2.5 rounded-2xl font-semibold text-xs tracking-wide shadow transition flex items-center justify-center gap-1.5"
@@ -338,7 +427,7 @@ export default function Home() {
         </form>
       )}
 
-      {/* Filter Tampilan Riwayat */}
+      {/* Filter Riwayat */}
       <div className="flex items-center justify-between gap-1 bg-slate-900 border border-slate-800 p-1 rounded-2xl">
         <button
           onClick={() => setFilterMode('all')}
@@ -410,8 +499,8 @@ export default function Home() {
               className="bg-slate-900 border border-slate-800 p-3.5 rounded-2xl space-y-2.5 transition"
             >
               {editingId === t.id ? (
-                /* Mode Edit Transaksi */
-                <form onSubmit={(e) => handleUpdate(e, t.id)} className="space-y-2 pt-1">
+                /* Form Edit Transaksi */
+                <form onSubmit={(e) => handleUpdateTransaction(e, t.id)} className="space-y-2 pt-1">
                   <input
                     type="text"
                     value={editTitle}
@@ -459,7 +548,7 @@ export default function Home() {
                   </div>
                 </form>
               ) : (
-                /* Mode Baris Normal */
+                /* Baris Transaksi Normal */
                 <div className="flex justify-between items-center">
                   <div>
                     <p className="font-semibold text-xs text-slate-200">{t.title}</p>
@@ -472,14 +561,14 @@ export default function Home() {
                     </p>
                     <div className="flex items-center gap-1 pl-1 border-l border-slate-800">
                       <button
-                        onClick={() => startEditing(t)}
+                        onClick={() => startEditingTransaction(t)}
                         title="Edit transaksi"
                         className="text-[11px] text-slate-400 hover:text-blue-400 px-1.5 py-1 rounded-lg hover:bg-slate-800 transition"
                       >
                         ✎
                       </button>
                       <button
-                        onClick={() => handleDelete(t.id)}
+                        onClick={() => handleDeleteTransaction(t.id)}
                         title="Hapus transaksi"
                         className="text-[11px] text-slate-400 hover:text-rose-400 px-1.5 py-1 rounded-lg hover:bg-slate-800 transition"
                       >
