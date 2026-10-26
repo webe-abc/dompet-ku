@@ -23,6 +23,9 @@ interface BudgetPeriod {
 export default function Home() {
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   
+  // State Tema (Gelap / Terang)
+  const [isDarkMode, setIsDarkMode] = useState(true);
+
   // State Daftar Modal & Modal Aktif
   const [budgets, setBudgets] = useState<BudgetPeriod[]>([]);
   const [activeBudgetId, setActiveBudgetId] = useState<string>('');
@@ -56,12 +59,23 @@ export default function Home() {
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
 
-  // Set tanggal default aman prerender
+  // Inisialisasi tema & tanggal
   useEffect(() => {
     const today = new Date().toISOString().split('T')[0];
     setDate(today);
     setSelectedMonth(today.slice(0, 7));
+
+    const savedTheme = localStorage.getItem('theme_mode');
+    if (savedTheme) {
+      setIsDarkMode(savedTheme === 'dark');
+    }
   }, []);
+
+  const toggleTheme = () => {
+    const nextTheme = !isDarkMode;
+    setIsDarkMode(nextTheme);
+    localStorage.setItem('theme_mode', nextTheme ? 'dark' : 'light');
+  };
 
   // Tarik semua daftar modal dari Supabase
   const fetchBudgets = async () => {
@@ -72,7 +86,6 @@ export default function Home() {
 
     if (!error && data && data.length > 0) {
       setBudgets(data);
-      // Cari modal yang aktif, atau pilih urutan pertama
       const active = data.find((b) => b.is_active) || data[0];
       setActiveBudgetId(active.id);
     }
@@ -102,13 +115,10 @@ export default function Home() {
     fetchBudgets();
   }, [fetchTransactions]);
 
-  // Modal yang sedang aktif saat ini
   const currentBudget = budgets.find((b) => b.id === activeBudgetId);
 
-  // Fungsi ganti / switch modal aktif
   const handleSwitchBudget = async (id: string) => {
     if (id === 'NEW_BUDGET') {
-      // Buka form tambah modal baru
       const today = new Date().toISOString().split('T')[0];
       setFormName('');
       setFormAmount('');
@@ -123,12 +133,10 @@ export default function Home() {
     setIsEditingBudget(false);
     setIsCreatingNewBudget(false);
 
-    // Update status aktif ke Supabase agar tersinkron di perangkat lain
     await supabase.from('budget_periods').update({ is_active: false }).neq('id', id);
     await supabase.from('budget_periods').update({ is_active: true }).eq('id', id);
   };
 
-  // Buka form edit untuk modal yang sedang aktif
   const handleOpenEdit = () => {
     if (!currentBudget) return;
     setFormName(currentBudget.name);
@@ -139,7 +147,6 @@ export default function Home() {
     setIsEditingBudget(!isEditingBudget);
   };
 
-  // Simpan perubahan edit atau penambahan modal baru
   const handleSaveBudgetForm = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!formName.trim() || !formStart || !formEnd) {
@@ -156,10 +163,7 @@ export default function Home() {
       is_active: true,
     };
 
-    // Jadikan modal lain tidak aktif
     await supabase.from('budget_periods').update({ is_active: false }).neq('id', targetId);
-    
-    // Simpan modal ini
     const { error } = await supabase.from('budget_periods').upsert(newBudgetPayload);
 
     if (!error) {
@@ -170,7 +174,6 @@ export default function Home() {
     }
   };
 
-  // Hapus modal yang sedang aktif
   const handleDeleteBudget = async () => {
     if (budgets.length <= 1) {
       return alert('Minimal harus ada satu modal tersimpan.');
@@ -184,7 +187,6 @@ export default function Home() {
     }
   };
 
-  // Transaksi Tambah
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!title || !amount || !date) return;
@@ -203,14 +205,12 @@ export default function Home() {
     }
   };
 
-  // Transaksi Hapus
   const handleDeleteTransaction = async (id: number) => {
     if (!confirm('Hapus transaksi ini?')) return;
     const { error } = await supabase.from('transactions').delete().eq('id', id);
     if (!error) fetchTransactions();
   };
 
-  // Transaksi Edit
   const startEditingTransaction = (t: Transaction) => {
     setEditingId(t.id);
     setEditTitle(t.title);
@@ -239,7 +239,6 @@ export default function Home() {
     }
   };
 
-  // Hitung pengeluaran khusus periode modal yang sedang dipilih
   const pengeluaranModalAktif = transactions
     .filter((t) => {
       if (!currentBudget?.start_date || !currentBudget?.end_date) return true;
@@ -251,337 +250,417 @@ export default function Home() {
   const sisaSaldo = budgetAmount - pengeluaranModalAktif;
 
   return (
-    <main className="max-w-sm mx-auto p-4 space-y-4 min-h-screen text-slate-100 font-sans">
-      {/* Kartu Ringkasan Modal & Switcher */}
-      <div className="bg-slate-900 border border-slate-800 rounded-3xl p-5 space-y-4 shadow-sm">
+    <div className={`min-h-screen transition-colors duration-200 ${isDarkMode ? 'bg-slate-950 text-slate-100' : 'bg-slate-100 text-slate-800'}`}>
+      <main className="max-w-sm mx-auto p-4 space-y-4 font-sans">
         
-        {/* Switcher Dropdown Modal */}
-        <div className="flex items-center gap-2">
-          <select
-            value={activeBudgetId}
-            onChange={(e) => handleSwitchBudget(e.target.value)}
-            className="flex-1 bg-slate-950 border border-blue-900/60 text-blue-300 font-bold text-xs px-3 py-2 rounded-xl focus:outline-none focus:border-blue-500"
-          >
-            {budgets.map((b) => (
-              <option key={b.id} value={b.id}>
-                {b.name} (Rp {Number(b.amount).toLocaleString('id-ID')})
-              </option>
-            ))}
-            <option value="NEW_BUDGET">+ Tambah Modal Baru...</option>
-          </select>
-
+        {/* Bar Atas: Judul & Tombol Toggle Tema */}
+        <div className="flex justify-between items-center px-1">
+          <span className="text-xs font-black tracking-wider uppercase opacity-70">Dompet-Ku</span>
           <button
-            onClick={handleOpenEdit}
-            className="text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 px-3 py-2 rounded-xl border border-slate-700 transition"
+            onClick={toggleTheme}
+            className={`text-xs px-3 py-1.5 rounded-full border font-medium flex items-center gap-1.5 transition ${
+              isDarkMode 
+                ? 'bg-slate-900 border-slate-800 text-amber-300 hover:bg-slate-800' 
+                : 'bg-white border-slate-300 text-slate-700 hover:bg-slate-200 shadow-sm'
+            }`}
           >
-            {isEditingBudget ? 'Batal' : 'Edit Modal'}
+            <span>{isDarkMode ? '☀️ Mode Terang' : '🌙 Mode Gelap'}</span>
           </button>
         </div>
 
-        <div>
-          <p className="text-[11px] font-bold text-slate-400 tracking-wider uppercase">Sisa Saldo</p>
-          <h1 className={`text-2xl font-black mt-0.5 ${sisaSaldo < 0 ? 'text-rose-400' : 'text-emerald-400'}`}>
-            Rp {sisaSaldo.toLocaleString('id-ID')}
-          </h1>
-          {currentBudget && (
-            <p className="text-[10px] text-slate-400 mt-1">
-              Periode: <span className="text-slate-300 font-medium">{currentBudget.start_date}</span> s/d <span className="text-slate-300 font-medium">{currentBudget.end_date}</span>
-            </p>
+        {/* Kartu Ringkasan Modal */}
+        <div className={`border rounded-3xl p-5 space-y-4 shadow-sm transition ${
+          isDarkMode ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200'
+        }`}>
+          
+          {/* Switcher Dropdown Modal */}
+          <div className="flex items-center gap-2">
+            <select
+              value={activeBudgetId}
+              onChange={(e) => handleSwitchBudget(e.target.value)}
+              className={`flex-1 border font-bold text-xs px-3 py-2 rounded-xl focus:outline-none focus:border-blue-500 transition ${
+                isDarkMode 
+                  ? 'bg-slate-950 border-blue-900/60 text-blue-300' 
+                  : 'bg-blue-50/60 border-blue-200 text-blue-700'
+              }`}
+            >
+              {budgets.map((b) => (
+                <option key={b.id} value={b.id}>
+                  {b.name} (Rp {Number(b.amount).toLocaleString('id-ID')})
+                </option>
+              ))}
+              <option value="NEW_BUDGET">+ Tambah Modal Baru...</option>
+            </select>
+
+            <button
+              onClick={handleOpenEdit}
+              className={`text-xs px-3 py-2 rounded-xl border transition ${
+                isDarkMode 
+                  ? 'bg-slate-800 hover:bg-slate-700 text-slate-300 border-slate-700' 
+                  : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border-slate-300'
+              }`}
+            >
+              {isEditingBudget ? 'Batal' : 'Edit'}
+            </button>
+          </div>
+
+          <div>
+            <p className="text-[11px] font-bold opacity-60 tracking-wider uppercase">Sisa Saldo</p>
+            <h1 className={`text-2xl font-black mt-0.5 ${sisaSaldo < 0 ? 'text-rose-500' : 'text-emerald-500'}`}>
+              Rp {sisaSaldo.toLocaleString('id-ID')}
+            </h1>
+            {currentBudget && (
+              <p className="text-[10px] opacity-60 mt-1">
+                Periode: <span className="font-semibold">{currentBudget.start_date}</span> s/d <span className="font-semibold">{currentBudget.end_date}</span>
+              </p>
+            )}
+          </div>
+
+          {/* Form Edit/Tambah Modal */}
+          {isEditingBudget && (
+            <form onSubmit={handleSaveBudgetForm} className={`p-3.5 rounded-2xl border space-y-2.5 transition ${
+              isDarkMode ? 'bg-slate-950 border-slate-800' : 'bg-slate-50 border-slate-200'
+            }`}>
+              <p className="text-xs font-bold text-blue-500">
+                {isCreatingNewBudget ? 'Tambah Modal Baru' : 'Edit Modal Ini'}
+              </p>
+              <div>
+                <label className="text-[10px] opacity-70 block mb-1">Nama Modal</label>
+                <input
+                  type="text"
+                  placeholder="Contoh: Modal Gaji November"
+                  value={formName}
+                  onChange={(e) => setFormName(e.target.value)}
+                  className={`w-full border px-2.5 py-1.5 rounded-xl text-xs focus:outline-none focus:border-blue-500 ${
+                    isDarkMode ? 'bg-slate-900 border-slate-700 text-white' : 'bg-white border-slate-300 text-slate-900'
+                  }`}
+                />
+              </div>
+              <div>
+                <label className="text-[10px] opacity-70 block mb-1">Nominal Modal (Rp)</label>
+                <input
+                  type="number"
+                  placeholder="Contoh: 3000000"
+                  value={formAmount}
+                  onChange={(e) => setFormAmount(e.target.value)}
+                  className={`w-full border px-2.5 py-1.5 rounded-xl text-xs focus:outline-none focus:border-blue-500 ${
+                    isDarkMode ? 'bg-slate-900 border-slate-700 text-white' : 'bg-white border-slate-300 text-slate-900'
+                  }`}
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="text-[10px] opacity-70 block mb-1">Mulai Pakai</label>
+                  <input
+                    type="date"
+                    value={formStart}
+                    onChange={(e) => setFormStart(e.target.value)}
+                    className={`w-full border px-2 py-1 rounded-xl text-xs focus:outline-none focus:border-blue-500 ${
+                      isDarkMode ? 'bg-slate-900 border-slate-700 text-white' : 'bg-white border-slate-300 text-slate-900'
+                    }`}
+                  />
+                </div>
+                <div>
+                  <label className="text-[10px] opacity-70 block mb-1">Selesai Pakai</label>
+                  <input
+                    type="date"
+                    value={formEnd}
+                    onChange={(e) => setFormEnd(e.target.value)}
+                    className={`w-full border px-2 py-1 rounded-xl text-xs focus:outline-none focus:border-blue-500 ${
+                      isDarkMode ? 'bg-slate-900 border-slate-700 text-white' : 'bg-white border-slate-300 text-slate-900'
+                    }`}
+                  />
+                </div>
+              </div>
+              
+              <div className="flex gap-2 pt-1">
+                {!isCreatingNewBudget && budgets.length > 1 && (
+                  <button
+                    type="button"
+                    onClick={handleDeleteBudget}
+                    className="bg-rose-500/10 text-rose-500 border border-rose-500/30 px-3 py-1.5 rounded-xl text-xs font-medium hover:bg-rose-500/20 transition"
+                  >
+                    Hapus
+                  </button>
+                )}
+                <button
+                  type="submit"
+                  className="flex-1 bg-blue-600 hover:bg-blue-500 text-white py-1.5 rounded-xl text-xs font-semibold"
+                >
+                  {isCreatingNewBudget ? 'Simpan Modal Baru' : 'Simpan Perubahan'}
+                </button>
+              </div>
+            </form>
           )}
+
+          <div className={`grid grid-cols-2 gap-2 pt-3 border-t text-xs ${
+            isDarkMode ? 'border-slate-800' : 'border-slate-200'
+          }`}>
+            <div>
+              <span className="opacity-60">Modal: </span>
+              <span className="font-semibold">Rp {budgetAmount.toLocaleString('id-ID')}</span>
+            </div>
+            <div className="text-right">
+              <span className="opacity-60">Terpakai: </span>
+              <span className="font-semibold text-rose-500">Rp {pengeluaranModalAktif.toLocaleString('id-ID')}</span>
+            </div>
+          </div>
         </div>
 
-        {/* Form Atur / Edit / Tambah Modal */}
-        {isEditingBudget && (
-          <form onSubmit={handleSaveBudgetForm} className="bg-slate-950 p-3.5 rounded-2xl border border-slate-800 space-y-2.5">
-            <p className="text-xs font-bold text-blue-400">
-              {isCreatingNewBudget ? 'Tambah Modal Baru' : 'Edit Modal Ini'}
-            </p>
-            <div>
-              <label className="text-[10px] text-slate-400 block mb-1">Nama Modal</label>
-              <input
-                type="text"
-                placeholder="Contoh: Modal Gaji November"
-                value={formName}
-                onChange={(e) => setFormName(e.target.value)}
-                className="w-full bg-slate-900 border border-slate-700 text-white px-2.5 py-1.5 rounded-xl text-xs focus:outline-none focus:border-blue-500"
-              />
-            </div>
-            <div>
-              <label className="text-[10px] text-slate-400 block mb-1">Nominal Modal (Rp)</label>
-              <input
-                type="number"
-                placeholder="Contoh: 3000000"
-                value={formAmount}
-                onChange={(e) => setFormAmount(e.target.value)}
-                className="w-full bg-slate-900 border border-slate-700 text-white px-2.5 py-1.5 rounded-xl text-xs focus:outline-none focus:border-blue-500"
-              />
-            </div>
+        {/* Tombol Tambah Transaksi */}
+        <button
+          onClick={() => setShowAddForm(!showAddForm)}
+          className="w-full bg-blue-600 hover:bg-blue-500 active:scale-[0.99] text-white py-2.5 rounded-2xl font-semibold text-xs tracking-wide shadow transition flex items-center justify-center gap-1.5"
+        >
+          <span>{showAddForm ? '✕ Tutup Form' : '+ Catat Pengeluaran Baru'}</span>
+        </button>
+
+        {/* Form Input Transaksi */}
+        {showAddForm && (
+          <form onSubmit={handleSubmit} className={`border p-4 rounded-3xl space-y-3 shadow-sm transition ${
+            isDarkMode ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200'
+          }`}>
+            <input
+              type="text"
+              placeholder="Untuk apa? (Contoh: Beli Kopi)"
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              className={`w-full border px-3 py-2 rounded-xl text-xs focus:outline-none focus:border-blue-500 ${
+                isDarkMode ? 'bg-slate-950 border-slate-800 text-white placeholder:text-slate-500' : 'bg-slate-50 border-slate-300 text-slate-900 placeholder:text-slate-400'
+              }`}
+              autoFocus
+            />
+
+            <input
+              type="number"
+              placeholder="Nominal (Rp)"
+              value={amount}
+              onChange={(e) => setAmount(e.target.value)}
+              className={`w-full border px-3 py-2 rounded-xl text-xs focus:outline-none focus:border-blue-500 ${
+                isDarkMode ? 'bg-slate-950 border-slate-800 text-white placeholder:text-slate-500' : 'bg-slate-50 border-slate-300 text-slate-900 placeholder:text-slate-400'
+              }`}
+            />
+
             <div className="grid grid-cols-2 gap-2">
-              <div>
-                <label className="text-[10px] text-slate-400 block mb-1">Mulai Pakai</label>
-                <input
-                  type="date"
-                  value={formStart}
-                  onChange={(e) => setFormStart(e.target.value)}
-                  className="w-full bg-slate-900 border border-slate-700 text-white px-2 py-1 rounded-xl text-xs focus:outline-none focus:border-blue-500"
-                />
-              </div>
-              <div>
-                <label className="text-[10px] text-slate-400 block mb-1">Selesai Pakai</label>
-                <input
-                  type="date"
-                  value={formEnd}
-                  onChange={(e) => setFormEnd(e.target.value)}
-                  className="w-full bg-slate-900 border border-slate-700 text-white px-2 py-1 rounded-xl text-xs focus:outline-none focus:border-blue-500"
-                />
-              </div>
-            </div>
-            
-            <div className="flex gap-2 pt-1">
-              {!isCreatingNewBudget && budgets.length > 1 && (
-                <button
-                  type="button"
-                  onClick={handleDeleteBudget}
-                  className="bg-rose-950 text-rose-300 border border-rose-800/60 px-3 py-1.5 rounded-xl text-xs font-medium hover:bg-rose-900 transition"
-                >
-                  Hapus
-                </button>
-              )}
-              <button
-                type="submit"
-                className="flex-1 bg-blue-600 hover:bg-blue-500 text-white py-1.5 rounded-xl text-xs font-semibold"
+              <select
+                value={category}
+                onChange={(e) => setCategory(e.target.value)}
+                className={`border px-2 py-2 rounded-xl text-xs focus:outline-none focus:border-blue-500 ${
+                  isDarkMode ? 'bg-slate-950 border-slate-800 text-slate-200' : 'bg-slate-50 border-slate-300 text-slate-800'
+                }`}
               >
-                {isCreatingNewBudget ? 'Simpan Modal Baru' : 'Simpan Perubahan'}
-              </button>
+                <option value="Makanan">Makanan</option>
+                <option value="Transport">Transport</option>
+                <option value="Hiburan">Hiburan</option>
+                <option value="Tagihan">Tagihan</option>
+              </select>
+
+              <input
+                type="date"
+                value={date}
+                onChange={(e) => setDate(e.target.value)}
+                className={`border px-2 py-2 rounded-xl text-xs focus:outline-none focus:border-blue-500 ${
+                  isDarkMode ? 'bg-slate-950 border-slate-800 text-slate-200' : 'bg-slate-50 border-slate-300 text-slate-800'
+                }`}
+              />
             </div>
+
+            <button
+              type="submit"
+              disabled={loading}
+              className="w-full bg-emerald-600 hover:bg-emerald-500 text-white py-2 rounded-xl text-xs font-bold transition disabled:opacity-50"
+            >
+              {loading ? 'Menyimpan...' : 'Simpan Transaksi'}
+            </button>
           </form>
         )}
 
-        <div className="grid grid-cols-2 gap-2 pt-3 border-t border-slate-800/80 text-xs">
-          <div>
-            <span className="text-slate-400">Modal: </span>
-            <span className="font-semibold text-slate-200">Rp {budgetAmount.toLocaleString('id-ID')}</span>
-          </div>
-          <div className="text-right">
-            <span className="text-slate-400">Terpakai: </span>
-            <span className="font-semibold text-rose-400">Rp {pengeluaranModalAktif.toLocaleString('id-ID')}</span>
-          </div>
+        {/* Filter Riwayat */}
+        <div className={`flex items-center justify-between gap-1 border p-1 rounded-2xl transition ${
+          isDarkMode ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200'
+        }`}>
+          <button
+            onClick={() => setFilterMode('all')}
+            className={`flex-1 py-1.5 text-[11px] rounded-xl font-medium transition ${
+              filterMode === 'all'
+                ? isDarkMode ? 'bg-slate-800 text-white font-bold' : 'bg-slate-200 text-slate-900 font-bold'
+                : 'opacity-60 hover:opacity-100'
+            }`}
+          >
+            Semua
+          </button>
+          <button
+            onClick={() => setFilterMode('month')}
+            className={`flex-1 py-1.5 text-[11px] rounded-xl font-medium transition ${
+              filterMode === 'month'
+                ? isDarkMode ? 'bg-slate-800 text-white font-bold' : 'bg-slate-200 text-slate-900 font-bold'
+                : 'opacity-60 hover:opacity-100'
+            }`}
+          >
+            Bulan
+          </button>
+          <button
+            onClick={() => setFilterMode('custom')}
+            className={`flex-1 py-1.5 text-[11px] rounded-xl font-medium transition ${
+              filterMode === 'custom'
+                ? isDarkMode ? 'bg-slate-800 text-white font-bold' : 'bg-slate-200 text-slate-900 font-bold'
+                : 'opacity-60 hover:opacity-100'
+            }`}
+          >
+            Kustom
+          </button>
         </div>
-      </div>
 
-      {/* Tombol Buka/Tutup Form Transaksi */}
-      <button
-        onClick={() => setShowAddForm(!showAddForm)}
-        className="w-full bg-blue-600 hover:bg-blue-500 active:scale-[0.99] text-white py-2.5 rounded-2xl font-semibold text-xs tracking-wide shadow transition flex items-center justify-center gap-1.5"
-      >
-        <span>{showAddForm ? '✕ Tutup Form' : '+ Catat Pengeluaran Baru'}</span>
-      </button>
-
-      {/* Form Tambah Pengeluaran */}
-      {showAddForm && (
-        <form onSubmit={handleSubmit} className="bg-slate-900 border border-slate-800 p-4 rounded-3xl space-y-3">
+        {filterMode === 'month' && (
           <input
-            type="text"
-            placeholder="Untuk apa? (Contoh: Beli Kopi)"
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-            className="w-full bg-slate-950 border border-slate-800 text-white px-3 py-2 rounded-xl text-xs placeholder:text-slate-500 focus:outline-none focus:border-blue-500"
-            autoFocus
+            type="month"
+            value={selectedMonth}
+            onChange={(e) => setSelectedMonth(e.target.value)}
+            className={`w-full border px-3 py-2 rounded-xl text-xs focus:outline-none focus:border-blue-500 ${
+              isDarkMode ? 'bg-slate-900 border-slate-800 text-white' : 'bg-white border-slate-300 text-slate-800'
+            }`}
           />
+        )}
 
-          <input
-            type="number"
-            placeholder="Nominal (Rp)"
-            value={amount}
-            onChange={(e) => setAmount(e.target.value)}
-            className="w-full bg-slate-950 border border-slate-800 text-white px-3 py-2 rounded-xl text-xs placeholder:text-slate-500 focus:outline-none focus:border-blue-500"
-          />
-
+        {filterMode === 'custom' && (
           <div className="grid grid-cols-2 gap-2">
-            <select
-              value={category}
-              onChange={(e) => setCategory(e.target.value)}
-              className="bg-slate-950 border border-slate-800 text-slate-200 px-2 py-2 rounded-xl text-xs focus:outline-none focus:border-blue-500"
-            >
-              <option value="Makanan">Makanan</option>
-              <option value="Transport">Transport</option>
-              <option value="Hiburan">Hiburan</option>
-              <option value="Tagihan">Tagihan</option>
-            </select>
-
             <input
               type="date"
-              value={date}
-              onChange={(e) => setDate(e.target.value)}
-              className="bg-slate-950 border border-slate-800 text-slate-200 px-2 py-2 rounded-xl text-xs focus:outline-none focus:border-blue-500"
+              value={startDate}
+              onChange={(e) => setStartDate(e.target.value)}
+              className={`border px-2 py-1.5 rounded-xl text-xs focus:outline-none focus:border-blue-500 ${
+                isDarkMode ? 'bg-slate-900 border-slate-800 text-white' : 'bg-white border-slate-300 text-slate-800'
+              }`}
+            />
+            <input
+              type="date"
+              value={endDate}
+              onChange={(e) => setEndDate(e.target.value)}
+              className={`border px-2 py-1.5 rounded-xl text-xs focus:outline-none focus:border-blue-500 ${
+                isDarkMode ? 'bg-slate-900 border-slate-800 text-white' : 'bg-white border-slate-300 text-slate-800'
+              }`}
             />
           </div>
+        )}
 
-          <button
-            type="submit"
-            disabled={loading}
-            className="w-full bg-emerald-600 hover:bg-emerald-500 text-white py-2 rounded-xl text-xs font-bold transition disabled:opacity-50"
-          >
-            {loading ? 'Menyimpan...' : 'Simpan Transaksi'}
-          </button>
-        </form>
-      )}
+        {/* Riwayat Transaksi */}
+        <div className="space-y-2 pt-1">
+          <div className="flex justify-between items-center px-1">
+            <p className="text-xs font-bold opacity-60">Riwayat</p>
+            <span className="text-[11px] opacity-50">{transactions.length} baris</span>
+          </div>
 
-      {/* Filter Riwayat */}
-      <div className="flex items-center justify-between gap-1 bg-slate-900 border border-slate-800 p-1 rounded-2xl">
-        <button
-          onClick={() => setFilterMode('all')}
-          className={`flex-1 py-1.5 text-[11px] rounded-xl font-medium transition ${
-            filterMode === 'all' ? 'bg-slate-800 text-white font-bold' : 'text-slate-400 hover:text-white'
-          }`}
-        >
-          Semua
-        </button>
-        <button
-          onClick={() => setFilterMode('month')}
-          className={`flex-1 py-1.5 text-[11px] rounded-xl font-medium transition ${
-            filterMode === 'month' ? 'bg-slate-800 text-white font-bold' : 'text-slate-400 hover:text-white'
-          }`}
-        >
-          Bulan
-        </button>
-        <button
-          onClick={() => setFilterMode('custom')}
-          className={`flex-1 py-1.5 text-[11px] rounded-xl font-medium transition ${
-            filterMode === 'custom' ? 'bg-slate-800 text-white font-bold' : 'text-slate-400 hover:text-white'
-          }`}
-        >
-          Kustom
-        </button>
-      </div>
-
-      {filterMode === 'month' && (
-        <input
-          type="month"
-          value={selectedMonth}
-          onChange={(e) => setSelectedMonth(e.target.value)}
-          className="w-full bg-slate-900 border border-slate-800 text-white px-3 py-2 rounded-xl text-xs focus:outline-none focus:border-blue-500"
-        />
-      )}
-
-      {filterMode === 'custom' && (
-        <div className="grid grid-cols-2 gap-2">
-          <input
-            type="date"
-            value={startDate}
-            onChange={(e) => setStartDate(e.target.value)}
-            className="bg-slate-900 border border-slate-800 text-white px-2 py-1.5 rounded-xl text-xs focus:outline-none focus:border-blue-500"
-          />
-          <input
-            type="date"
-            value={endDate}
-            onChange={(e) => setEndDate(e.target.value)}
-            className="bg-slate-900 border border-slate-800 text-white px-2 py-1.5 rounded-xl text-xs focus:outline-none focus:border-blue-500"
-          />
-        </div>
-      )}
-
-      {/* Riwayat Transaksi */}
-      <div className="space-y-2 pt-1">
-        <div className="flex justify-between items-center px-1">
-          <p className="text-xs font-bold text-slate-400">Riwayat</p>
-          <span className="text-[11px] text-slate-500">{transactions.length} baris</span>
-        </div>
-
-        {transactions.length === 0 ? (
-          <p className="text-xs text-slate-500 text-center py-6 bg-slate-900/50 border border-slate-800/80 rounded-2xl">
-            Tidak ada transaksi.
-          </p>
-        ) : (
-          transactions.map((t) => (
-            <div
-              key={t.id}
-              className="bg-slate-900 border border-slate-800 p-3.5 rounded-2xl space-y-2.5 transition"
-            >
-              {editingId === t.id ? (
-                /* Form Edit Transaksi */
-                <form onSubmit={(e) => handleUpdateTransaction(e, t.id)} className="space-y-2 pt-1">
-                  <input
-                    type="text"
-                    value={editTitle}
-                    onChange={(e) => setEditTitle(e.target.value)}
-                    className="w-full bg-slate-950 border border-slate-700 text-white px-2.5 py-1.5 rounded-xl text-xs focus:outline-none focus:border-blue-500"
-                  />
-                  <div className="grid grid-cols-2 gap-2">
+          {transactions.length === 0 ? (
+            <p className={`text-xs opacity-50 text-center py-6 border rounded-2xl ${
+              isDarkMode ? 'bg-slate-900/50 border-slate-800/80' : 'bg-white border-slate-200'
+            }`}>
+              Tidak ada transaksi.
+            </p>
+          ) : (
+            transactions.map((t) => (
+              <div
+                key={t.id}
+                className={`border p-3.5 rounded-2xl space-y-2.5 transition ${
+                  isDarkMode ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200 shadow-sm'
+                }`}
+              >
+                {editingId === t.id ? (
+                  /* Form Edit Transaksi */
+                  <form onSubmit={(e) => handleUpdateTransaction(e, t.id)} className="space-y-2 pt-1">
                     <input
-                      type="number"
-                      value={editAmount}
-                      onChange={(e) => setEditAmount(e.target.value)}
-                      className="bg-slate-950 border border-slate-700 text-white px-2.5 py-1.5 rounded-xl text-xs focus:outline-none focus:border-blue-500"
+                      type="text"
+                      value={editTitle}
+                      onChange={(e) => setEditTitle(e.target.value)}
+                      className={`w-full border px-2.5 py-1.5 rounded-xl text-xs focus:outline-none focus:border-blue-500 ${
+                        isDarkMode ? 'bg-slate-950 border-slate-700 text-white' : 'bg-slate-50 border-slate-300 text-slate-900'
+                      }`}
                     />
-                    <select
-                      value={editCategory}
-                      onChange={(e) => setEditCategory(e.target.value)}
-                      className="bg-slate-950 border border-slate-700 text-slate-200 px-2 py-1.5 rounded-xl text-xs focus:outline-none focus:border-blue-500"
-                    >
-                      <option value="Makanan">Makanan</option>
-                      <option value="Transport">Transport</option>
-                      <option value="Hiburan">Hiburan</option>
-                      <option value="Tagihan">Tagihan</option>
-                    </select>
-                  </div>
-                  <input
-                    type="date"
-                    value={editDate}
-                    onChange={(e) => setEditDate(e.target.value)}
-                    className="w-full bg-slate-950 border border-slate-700 text-slate-200 px-2.5 py-1.5 rounded-xl text-xs focus:outline-none focus:border-blue-500"
-                  />
-                  <div className="flex justify-end gap-1.5 pt-1">
-                    <button
-                      type="button"
-                      onClick={() => setEditingId(null)}
-                      className="text-[11px] bg-slate-800 hover:bg-slate-700 text-slate-300 px-3 py-1 rounded-xl transition"
-                    >
-                      Batal
-                    </button>
-                    <button
-                      type="submit"
-                      className="text-[11px] bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-1 rounded-xl font-semibold transition"
-                    >
-                      Simpan
-                    </button>
-                  </div>
-                </form>
-              ) : (
-                /* Baris Transaksi Normal */
-                <div className="flex justify-between items-center">
-                  <div>
-                    <p className="font-semibold text-xs text-slate-200">{t.title}</p>
-                    <p className="text-[10px] text-slate-500 mt-0.5">{t.category} • {t.date}</p>
-                  </div>
-
-                  <div className="flex items-center gap-3">
-                    <p className="text-xs font-bold text-rose-400">
-                      -Rp {Number(t.amount).toLocaleString('id-ID')}
-                    </p>
-                    <div className="flex items-center gap-1 pl-1 border-l border-slate-800">
-                      <button
-                        onClick={() => startEditingTransaction(t)}
-                        title="Edit transaksi"
-                        className="text-[11px] text-slate-400 hover:text-blue-400 px-1.5 py-1 rounded-lg hover:bg-slate-800 transition"
+                    <div className="grid grid-cols-2 gap-2">
+                      <input
+                        type="number"
+                        value={editAmount}
+                        onChange={(e) => setEditAmount(e.target.value)}
+                        className={`border px-2.5 py-1.5 rounded-xl text-xs focus:outline-none focus:border-blue-500 ${
+                          isDarkMode ? 'bg-slate-950 border-slate-700 text-white' : 'bg-slate-50 border-slate-300 text-slate-900'
+                        }`}
+                      />
+                      <select
+                        value={editCategory}
+                        onChange={(e) => setEditCategory(e.target.value)}
+                        className={`border px-2.5 py-1.5 rounded-xl text-xs focus:outline-none focus:border-blue-500 ${
+                          isDarkMode ? 'bg-slate-950 border-slate-700 text-slate-200' : 'bg-slate-50 border-slate-300 text-slate-800'
+                        }`}
                       >
-                        ✎
+                        <option value="Makanan">Makanan</option>
+                        <option value="Transport">Transport</option>
+                        <option value="Hiburan">Hiburan</option>
+                        <option value="Tagihan">Tagihan</option>
+                      </select>
+                    </div>
+                    <input
+                      type="date"
+                      value={editDate}
+                      onChange={(e) => setEditDate(e.target.value)}
+                      className={`w-full border px-2.5 py-1.5 rounded-xl text-xs focus:outline-none focus:border-blue-500 ${
+                        isDarkMode ? 'bg-slate-950 border-slate-700 text-slate-200' : 'bg-slate-50 border-slate-300 text-slate-800'
+                      }`}
+                    />
+                    <div className="flex justify-end gap-1.5 pt-1">
+                      <button
+                        type="button"
+                        onClick={() => setEditingId(null)}
+                        className={`text-[11px] px-3 py-1 rounded-xl transition ${
+                          isDarkMode ? 'bg-slate-800 hover:bg-slate-700 text-slate-300' : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
+                        }`}
+                      >
+                        Batal
                       </button>
                       <button
-                        onClick={() => handleDeleteTransaction(t.id)}
-                        title="Hapus transaksi"
-                        className="text-[11px] text-slate-400 hover:text-rose-400 px-1.5 py-1 rounded-lg hover:bg-slate-800 transition"
+                        type="submit"
+                        className="text-[11px] bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-1 rounded-xl font-semibold transition"
                       >
-                        ✕
+                        Simpan
                       </button>
                     </div>
+                  </form>
+                ) : (
+                  /* Tampilan Normal Baris Transaksi */
+                  <div className="flex justify-between items-center">
+                    <div>
+                      <p className="font-semibold text-xs">{t.title}</p>
+                      <p className="text-[10px] opacity-60 mt-0.5">{t.category} • {t.date}</p>
+                    </div>
+
+                    <div className="flex items-center gap-3">
+                      <p className="text-xs font-bold text-rose-500">
+                        -Rp {Number(t.amount).toLocaleString('id-ID')}
+                      </p>
+                      <div className={`flex items-center gap-1 pl-1 border-l ${
+                        isDarkMode ? 'border-slate-800' : 'border-slate-200'
+                      }`}>
+                        <button
+                          onClick={() => startEditingTransaction(t)}
+                          title="Edit transaksi"
+                          className="text-[11px] opacity-60 hover:opacity-100 hover:text-blue-500 px-1.5 py-1 rounded-lg transition"
+                        >
+                          ✎
+                        </button>
+                        <button
+                          onClick={() => handleDeleteTransaction(t.id)}
+                          title="Hapus transaksi"
+                          className="text-[11px] opacity-60 hover:opacity-100 hover:text-rose-500 px-1.5 py-1 rounded-lg transition"
+                        >
+                          ✕
+                        </button>
+                      </div>
+                    </div>
                   </div>
-                </div>
-              )}
-            </div>
-          ))
-        )}
-      </div>
-    </main>
+                )}
+              </div>
+            ))
+          )}
+        </div>
+      </main>
+    </div>
   );
 }
