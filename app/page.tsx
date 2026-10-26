@@ -13,12 +13,19 @@ interface Transaction {
 
 export default function Home() {
   const [transactions, setTransactions] = useState<Transaction[]>([]);
+  
+  // State Modal dengan Rentang Waktu
   const [initialBudget, setInitialBudget] = useState<number>(0);
+  const [budgetStart, setBudgetStart] = useState<string>('');
+  const [budgetEnd, setBudgetEnd] = useState<string>('');
+  
   const [tempBudget, setTempBudget] = useState<string>('');
+  const [tempStart, setTempStart] = useState<string>('');
+  const [tempEnd, setTempEnd] = useState<string>('');
   const [isEditingBudget, setIsEditingBudget] = useState(false);
-  const [showAddForm, setShowAddForm] = useState(false);
 
   // Form input tambah
+  const [showAddForm, setShowAddForm] = useState(false);
   const [title, setTitle] = useState('');
   const [amount, setAmount] = useState('');
   const [category, setCategory] = useState('Makanan');
@@ -32,30 +39,34 @@ export default function Home() {
   const [editCategory, setEditCategory] = useState('Makanan');
   const [editDate, setEditDate] = useState('');
 
-  // Filter
+  // Filter Tampilan Riwayat
   const [filterMode, setFilterMode] = useState<'all' | 'month' | 'custom'>('all');
   const [selectedMonth, setSelectedMonth] = useState('');
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
 
-  // Set nilai tanggal default di browser
+  // Tanggal default saat dimuat
   useEffect(() => {
-    const today = new Date().toISOString();
-    setDate(today.split('T')[0]);
+    const today = new Date().toISOString().split('T')[0];
+    setDate(today);
     setSelectedMonth(today.slice(0, 7));
   }, []);
 
-  // Tarik data modal awal dari database Supabase
-  const fetchBudget = async () => {
+  // Tarik data modal & rentang waktu dari Supabase
+  const fetchBudgetPeriod = async () => {
     const { data, error } = await supabase
-      .from('settings')
-      .select('value')
-      .eq('id', 'initial_budget')
+      .from('budget_periods')
+      .select('*')
+      .eq('id', 'active_budget')
       .maybeSingle();
 
     if (!error && data) {
-      setInitialBudget(Number(data.value) || 0);
-      setTempBudget(data.value);
+      setInitialBudget(Number(data.amount) || 0);
+      setBudgetStart(data.start_date);
+      setBudgetEnd(data.end_date);
+      setTempBudget(data.amount.toString());
+      setTempStart(data.start_date);
+      setTempEnd(data.end_date);
     }
   };
 
@@ -80,20 +91,26 @@ export default function Home() {
 
   useEffect(() => {
     fetchTransactions();
-    fetchBudget();
+    fetchBudgetPeriod();
   }, [fetchTransactions]);
 
-  // Simpan perubahan modal ke Supabase
+  // Simpan perubahan Modal beserta rentang tanggalnya
   const handleSaveBudget = async (e: React.FormEvent) => {
     e.preventDefault();
     const val = Number(tempBudget) || 0;
+    if (!tempStart || !tempEnd) return alert('Pilih tanggal mulai dan selesai modal');
 
-    const { error } = await supabase
-      .from('settings')
-      .upsert({ id: 'initial_budget', value: val.toString() });
+    const { error } = await supabase.from('budget_periods').upsert({
+      id: 'active_budget',
+      amount: val,
+      start_date: tempStart,
+      end_date: tempEnd,
+    });
 
     if (!error) {
       setInitialBudget(val);
+      setBudgetStart(tempStart);
+      setBudgetEnd(tempEnd);
       setIsEditingBudget(false);
     }
   };
@@ -101,7 +118,7 @@ export default function Home() {
   // Tambah transaksi
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!title || !amount) return;
+    if (!title || !amount || !date) return;
 
     setLoading(true);
     const { error } = await supabase.from('transactions').insert([
@@ -119,15 +136,12 @@ export default function Home() {
 
   // Hapus transaksi
   const handleDelete = async (id: number) => {
-    if (!confirm('Yakin ingin menghapus catatan ini?')) return;
-
+    if (!confirm('Hapus transaksi ini?')) return;
     const { error } = await supabase.from('transactions').delete().eq('id', id);
-    if (!error) {
-      fetchTransactions();
-    }
+    if (!error) fetchTransactions();
   };
 
-  // Masuk ke mode edit transaksi
+  // Masuk mode edit
   const startEditing = (t: Transaction) => {
     setEditingId(t.id);
     setEditTitle(t.title);
@@ -136,7 +150,7 @@ export default function Home() {
     setEditDate(t.date);
   };
 
-  // Simpan hasil edit
+  // Simpan update edit
   const handleUpdate = async (e: React.FormEvent, id: number) => {
     e.preventDefault();
     if (!editTitle || !editAmount) return;
@@ -157,19 +171,31 @@ export default function Home() {
     }
   };
 
-  const totalPengeluaran = transactions.reduce((acc, curr) => acc + Number(curr.amount), 0);
-  const sisaSaldo = initialBudget - totalPengeluaran;
+  // Hitung pengeluaran HANYA yang berada dalam rentang tanggal modal aktif
+  const pengeluaranModalAktif = transactions
+    .filter((t) => {
+      if (!budgetStart || !budgetEnd) return true;
+      return t.date >= budgetStart && t.date <= budgetEnd;
+    })
+    .reduce((acc, curr) => acc + Number(curr.amount), 0);
+
+  const sisaSaldo = initialBudget - pengeluaranModalAktif;
 
   return (
     <main className="max-w-sm mx-auto p-4 space-y-4 min-h-screen text-slate-100 font-sans">
-      {/* Kartu Ringkasan Minimalis */}
+      {/* Kartu Ringkasan Modal & Saldo */}
       <div className="bg-slate-900 border border-slate-800 rounded-3xl p-5 space-y-4 shadow-sm">
-        <div className="flex justify-between items-center">
+        <div className="flex justify-between items-start">
           <div>
-            <p className="text-[11px] font-bold text-slate-400 tracking-wider uppercase">Sisa Saldo</p>
+            <p className="text-[11px] font-bold text-slate-400 tracking-wider uppercase">Sisa Saldo Periode</p>
             <h1 className={`text-2xl font-black mt-0.5 ${sisaSaldo < 0 ? 'text-rose-400' : 'text-emerald-400'}`}>
               Rp {sisaSaldo.toLocaleString('id-ID')}
             </h1>
+            {budgetStart && budgetEnd && (
+              <p className="text-[10px] text-slate-400 mt-1">
+                Rentang: <span className="text-slate-300 font-medium">{budgetStart}</span> s/d <span className="text-slate-300 font-medium">{budgetEnd}</span>
+              </p>
+            )}
           </div>
           <button
             onClick={() => setIsEditingBudget(!isEditingBudget)}
@@ -179,17 +205,41 @@ export default function Home() {
           </button>
         </div>
 
+        {/* Form Atur Modal + Rentang Tanggal */}
         {isEditingBudget && (
-          <form onSubmit={handleSaveBudget} className="flex gap-2 pt-1">
-            <input
-              type="number"
-              placeholder="Ketik modal..."
-              value={tempBudget}
-              onChange={(e) => setTempBudget(e.target.value)}
-              className="flex-1 bg-slate-950 border border-slate-700 text-white px-3 py-1.5 rounded-xl text-xs focus:outline-none focus:border-blue-500"
-            />
-            <button type="submit" className="bg-blue-600 hover:bg-blue-500 text-white px-3 py-1.5 rounded-xl text-xs font-semibold">
-              Simpan
+          <form onSubmit={handleSaveBudget} className="bg-slate-950 p-3 rounded-2xl border border-slate-800 space-y-2.5">
+            <div>
+              <label className="text-[10px] text-slate-400 block mb-1">Nominal Modal (Rp)</label>
+              <input
+                type="number"
+                placeholder="Nominal..."
+                value={tempBudget}
+                onChange={(e) => setTempBudget(e.target.value)}
+                className="w-full bg-slate-900 border border-slate-700 text-white px-2.5 py-1.5 rounded-xl text-xs focus:outline-none focus:border-blue-500"
+              />
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <label className="text-[10px] text-slate-400 block mb-1">Mulai Pakai</label>
+                <input
+                  type="date"
+                  value={tempStart}
+                  onChange={(e) => setTempStart(e.target.value)}
+                  className="w-full bg-slate-900 border border-slate-700 text-white px-2 py-1 rounded-xl text-xs focus:outline-none focus:border-blue-500"
+                />
+              </div>
+              <div>
+                <label className="text-[10px] text-slate-400 block mb-1">Selesai Pakai</label>
+                <input
+                  type="date"
+                  value={tempEnd}
+                  onChange={(e) => setTempEnd(e.target.value)}
+                  className="w-full bg-slate-900 border border-slate-700 text-white px-2 py-1 rounded-xl text-xs focus:outline-none focus:border-blue-500"
+                />
+              </div>
+            </div>
+            <button type="submit" className="w-full bg-blue-600 hover:bg-blue-500 text-white py-1.5 rounded-xl text-xs font-semibold">
+              Simpan Periode Modal
             </button>
           </form>
         )}
@@ -200,13 +250,13 @@ export default function Home() {
             <span className="font-semibold text-slate-200">Rp {initialBudget.toLocaleString('id-ID')}</span>
           </div>
           <div className="text-right">
-            <span className="text-slate-400">Keluar: </span>
-            <span className="font-semibold text-rose-400">Rp {totalPengeluaran.toLocaleString('id-ID')}</span>
+            <span className="text-slate-400">Terpakai: </span>
+            <span className="font-semibold text-rose-400">Rp {pengeluaranModalAktif.toLocaleString('id-ID')}</span>
           </div>
         </div>
       </div>
 
-      {/* Tombol Buka/Tutup Form Tambah */}
+      {/* Tombol Catat Transaksi */}
       <button
         onClick={() => setShowAddForm(!showAddForm)}
         className="w-full bg-blue-600 hover:bg-blue-500 active:scale-[0.99] text-white py-2.5 rounded-2xl font-semibold text-xs tracking-wide shadow transition flex items-center justify-center gap-1.5"
@@ -264,7 +314,7 @@ export default function Home() {
         </form>
       )}
 
-      {/* Filter Ringkas */}
+      {/* Filter Riwayat */}
       <div className="flex items-center justify-between gap-1 bg-slate-900 border border-slate-800 p-1 rounded-2xl">
         <button
           onClick={() => setFilterMode('all')}
@@ -336,7 +386,7 @@ export default function Home() {
               className="bg-slate-900 border border-slate-800 p-3.5 rounded-2xl space-y-2.5 transition"
             >
               {editingId === t.id ? (
-                /* Formulir Edit inline */
+                /* Mode Edit */
                 <form onSubmit={(e) => handleUpdate(e, t.id)} className="space-y-2 pt-1">
                   <input
                     type="text"
@@ -385,7 +435,7 @@ export default function Home() {
                   </div>
                 </form>
               ) : (
-                /* Tampilan Baris Normal dengan Tombol Edit & Hapus */
+                /* Mode Normal */
                 <div className="flex justify-between items-center">
                   <div>
                     <p className="font-semibold text-xs text-slate-200">{t.title}</p>
