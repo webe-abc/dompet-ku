@@ -14,17 +14,20 @@ interface Transaction {
 export default function Home() {
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   
-  // State Modal dengan Rentang Waktu
+  // State Modal (Nama, Nominal, & Rentang Waktu)
+  const [budgetName, setBudgetName] = useState<string>('Modal Gaji');
   const [initialBudget, setInitialBudget] = useState<number>(0);
   const [budgetStart, setBudgetStart] = useState<string>('');
   const [budgetEnd, setBudgetEnd] = useState<string>('');
   
+  // State Sementara untuk Form Atur Modal
+  const [tempName, setTempName] = useState<string>('');
   const [tempBudget, setTempBudget] = useState<string>('');
   const [tempStart, setTempStart] = useState<string>('');
   const [tempEnd, setTempEnd] = useState<string>('');
   const [isEditingBudget, setIsEditingBudget] = useState(false);
 
-  // Form input tambah
+  // Form input transaksi baru
   const [showAddForm, setShowAddForm] = useState(false);
   const [title, setTitle] = useState('');
   const [amount, setAmount] = useState('');
@@ -39,20 +42,20 @@ export default function Home() {
   const [editCategory, setEditCategory] = useState('Makanan');
   const [editDate, setEditDate] = useState('');
 
-  // Filter Tampilan Riwayat
+  // Filter Riwayat Transaksi
   const [filterMode, setFilterMode] = useState<'all' | 'month' | 'custom'>('all');
   const [selectedMonth, setSelectedMonth] = useState('');
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
 
-  // Tanggal default saat dimuat
+  // Inisialisasi tanggal default di sisi browser (bebas error prerender)
   useEffect(() => {
     const today = new Date().toISOString().split('T')[0];
     setDate(today);
     setSelectedMonth(today.slice(0, 7));
   }, []);
 
-  // Tarik data modal & rentang waktu dari Supabase
+  // Tarik data modal aktif dari Supabase
   const fetchBudgetPeriod = async () => {
     const { data, error } = await supabase
       .from('budget_periods')
@@ -61,16 +64,19 @@ export default function Home() {
       .maybeSingle();
 
     if (!error && data) {
+      setBudgetName(data.name || 'Modal Gaji');
       setInitialBudget(Number(data.amount) || 0);
-      setBudgetStart(data.start_date);
-      setBudgetEnd(data.end_date);
-      setTempBudget(data.amount.toString());
-      setTempStart(data.start_date);
-      setTempEnd(data.end_date);
+      setBudgetStart(data.start_date || '');
+      setBudgetEnd(data.end_date || '');
+
+      setTempName(data.name || 'Modal Gaji');
+      setTempBudget(data.amount ? data.amount.toString() : '');
+      setTempStart(data.start_date || '');
+      setTempEnd(data.end_date || '');
     }
   };
 
-  // Tarik riwayat transaksi
+  // Tarik daftar riwayat transaksi
   const fetchTransactions = useCallback(async () => {
     let query = supabase.from('transactions').select('*').order('date', { ascending: false });
 
@@ -94,20 +100,23 @@ export default function Home() {
     fetchBudgetPeriod();
   }, [fetchTransactions]);
 
-  // Simpan perubahan Modal beserta rentang tanggalnya
+  // Simpan perubahan nama, nominal, dan tanggal modal ke Supabase
   const handleSaveBudget = async (e: React.FormEvent) => {
     e.preventDefault();
     const val = Number(tempBudget) || 0;
-    if (!tempStart || !tempEnd) return alert('Pilih tanggal mulai dan selesai modal');
+    if (!tempName.trim()) return alert('Masukkan sub nama modal (misal: Modal Gaji Oktober)');
+    if (!tempStart || !tempEnd) return alert('Pilih tanggal mulai dan tanggal selesai');
 
     const { error } = await supabase.from('budget_periods').upsert({
       id: 'active_budget',
+      name: tempName.trim(),
       amount: val,
       start_date: tempStart,
       end_date: tempEnd,
     });
 
     if (!error) {
+      setBudgetName(tempName.trim());
       setInitialBudget(val);
       setBudgetStart(tempStart);
       setBudgetEnd(tempEnd);
@@ -115,7 +124,7 @@ export default function Home() {
     }
   };
 
-  // Tambah transaksi
+  // Simpan transaksi baru
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!title || !amount || !date) return;
@@ -141,7 +150,7 @@ export default function Home() {
     if (!error) fetchTransactions();
   };
 
-  // Masuk mode edit
+  // Masuk mode edit transaksi
   const startEditing = (t: Transaction) => {
     setEditingId(t.id);
     setEditTitle(t.title);
@@ -150,7 +159,7 @@ export default function Home() {
     setEditDate(t.date);
   };
 
-  // Simpan update edit
+  // Simpan update transaksi
   const handleUpdate = async (e: React.FormEvent, id: number) => {
     e.preventDefault();
     if (!editTitle || !editAmount) return;
@@ -171,7 +180,7 @@ export default function Home() {
     }
   };
 
-  // Hitung pengeluaran HANYA yang berada dalam rentang tanggal modal aktif
+  // Hitung pengeluaran HANYA yang tanggalnya masuk ke rentang waktu modal
   const pengeluaranModalAktif = transactions
     .filter((t) => {
       if (!budgetStart || !budgetEnd) return true;
@@ -183,36 +192,51 @@ export default function Home() {
 
   return (
     <main className="max-w-sm mx-auto p-4 space-y-4 min-h-screen text-slate-100 font-sans">
-      {/* Kartu Ringkasan Modal & Saldo */}
+      {/* Kartu Ringkasan Modal & Rentang Periode */}
       <div className="bg-slate-900 border border-slate-800 rounded-3xl p-5 space-y-4 shadow-sm">
-        <div className="flex justify-between items-start">
+        <div className="flex justify-between items-start gap-2">
           <div>
-            <p className="text-[11px] font-bold text-slate-400 tracking-wider uppercase">Sisa Saldo Periode</p>
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <span className="text-[10px] font-bold bg-blue-950 text-blue-300 border border-blue-800/60 px-2 py-0.5 rounded-md uppercase tracking-wide">
+                {budgetName}
+              </span>
+            </div>
+            <p className="text-[11px] font-bold text-slate-400 tracking-wider uppercase mt-1">Sisa Saldo</p>
             <h1 className={`text-2xl font-black mt-0.5 ${sisaSaldo < 0 ? 'text-rose-400' : 'text-emerald-400'}`}>
               Rp {sisaSaldo.toLocaleString('id-ID')}
             </h1>
             {budgetStart && budgetEnd && (
               <p className="text-[10px] text-slate-400 mt-1">
-                Rentang: <span className="text-slate-300 font-medium">{budgetStart}</span> s/d <span className="text-slate-300 font-medium">{budgetEnd}</span>
+                Periode: <span className="text-slate-300 font-medium">{budgetStart}</span> s/d <span className="text-slate-300 font-medium">{budgetEnd}</span>
               </p>
             )}
           </div>
           <button
             onClick={() => setIsEditingBudget(!isEditingBudget)}
-            className="text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 px-3 py-1.5 rounded-full border border-slate-700 transition"
+            className="text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 px-3 py-1.5 rounded-full border border-slate-700 transition shrink-0"
           >
             {isEditingBudget ? 'Batal' : 'Atur Modal'}
           </button>
         </div>
 
-        {/* Form Atur Modal + Rentang Tanggal */}
+        {/* Form Edit Modal, Sub-Nama, dan Tanggal Mulai/Selesai */}
         {isEditingBudget && (
-          <form onSubmit={handleSaveBudget} className="bg-slate-950 p-3 rounded-2xl border border-slate-800 space-y-2.5">
+          <form onSubmit={handleSaveBudget} className="bg-slate-950 p-3.5 rounded-2xl border border-slate-800 space-y-2.5">
+            <div>
+              <label className="text-[10px] text-slate-400 block mb-1">Sub Nama Modal</label>
+              <input
+                type="text"
+                placeholder="Contoh: Modal Gaji Oktober"
+                value={tempName}
+                onChange={(e) => setTempName(e.target.value)}
+                className="w-full bg-slate-900 border border-slate-700 text-white px-2.5 py-1.5 rounded-xl text-xs focus:outline-none focus:border-blue-500"
+              />
+            </div>
             <div>
               <label className="text-[10px] text-slate-400 block mb-1">Nominal Modal (Rp)</label>
               <input
                 type="number"
-                placeholder="Nominal..."
+                placeholder="Masukkan nominal..."
                 value={tempBudget}
                 onChange={(e) => setTempBudget(e.target.value)}
                 className="w-full bg-slate-900 border border-slate-700 text-white px-2.5 py-1.5 rounded-xl text-xs focus:outline-none focus:border-blue-500"
@@ -256,7 +280,7 @@ export default function Home() {
         </div>
       </div>
 
-      {/* Tombol Catat Transaksi */}
+      {/* Tombol Buka/Tutup Form Tambah Transaksi */}
       <button
         onClick={() => setShowAddForm(!showAddForm)}
         className="w-full bg-blue-600 hover:bg-blue-500 active:scale-[0.99] text-white py-2.5 rounded-2xl font-semibold text-xs tracking-wide shadow transition flex items-center justify-center gap-1.5"
@@ -314,7 +338,7 @@ export default function Home() {
         </form>
       )}
 
-      {/* Filter Riwayat */}
+      {/* Filter Tampilan Riwayat */}
       <div className="flex items-center justify-between gap-1 bg-slate-900 border border-slate-800 p-1 rounded-2xl">
         <button
           onClick={() => setFilterMode('all')}
@@ -386,7 +410,7 @@ export default function Home() {
               className="bg-slate-900 border border-slate-800 p-3.5 rounded-2xl space-y-2.5 transition"
             >
               {editingId === t.id ? (
-                /* Mode Edit */
+                /* Mode Edit Transaksi */
                 <form onSubmit={(e) => handleUpdate(e, t.id)} className="space-y-2 pt-1">
                   <input
                     type="text"
@@ -435,7 +459,7 @@ export default function Home() {
                   </div>
                 </form>
               ) : (
-                /* Mode Normal */
+                /* Mode Baris Normal */
                 <div className="flex justify-between items-center">
                   <div>
                     <p className="font-semibold text-xs text-slate-200">{t.title}</p>
