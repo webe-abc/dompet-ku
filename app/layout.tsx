@@ -13,9 +13,25 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "DompetKu - Catatan Keuangan AMG",
-  description: "Aplikasi Pencatat Pengeluaran Uang Jajan",
+  title: "DompetKu - Catatan Keuangan",
+  description: "Aplikasi pencatat pengeluaran uang bulanan",
   manifest: "/manifest.json",
+  icons: {
+    icon: "/logojajan.png",
+    apple: "/logojajan.png",
+  },
+  openGraph: {
+    title: "DompetKu - Catatan Keuangan",
+    description: "Aplikasi pencatat pengeluaran uang bulanan",
+    images: [
+      {
+        url: "/logojajan.png",
+        width: 512,
+        height: 512,
+        alt: "Logo DompetKu",
+      },
+    ],
+  },
 };
 
 export default function RootLayout({
