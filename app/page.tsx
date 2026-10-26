@@ -18,12 +18,19 @@ export default function Home() {
   const [isEditingBudget, setIsEditingBudget] = useState(false);
   const [showAddForm, setShowAddForm] = useState(false);
 
-  // Form input
+  // Form input tambah
   const [title, setTitle] = useState('');
   const [amount, setAmount] = useState('');
   const [category, setCategory] = useState('Makanan');
   const [date, setDate] = useState('');
   const [loading, setLoading] = useState(false);
+
+  // State untuk Edit Transaksi
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [editTitle, setEditTitle] = useState('');
+  const [editAmount, setEditAmount] = useState('');
+  const [editCategory, setEditCategory] = useState('Makanan');
+  const [editDate, setEditDate] = useState('');
 
   // Filter
   const [filterMode, setFilterMode] = useState<'all' | 'month' | 'custom'>('all');
@@ -76,7 +83,7 @@ export default function Home() {
     fetchBudget();
   }, [fetchTransactions]);
 
-  // Simpan perubahan modal langsung ke Supabase
+  // Simpan perubahan modal ke Supabase
   const handleSaveBudget = async (e: React.FormEvent) => {
     e.preventDefault();
     const val = Number(tempBudget) || 0;
@@ -91,6 +98,7 @@ export default function Home() {
     }
   };
 
+  // Tambah transaksi
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!title || !amount) return;
@@ -105,6 +113,46 @@ export default function Home() {
       setTitle('');
       setAmount('');
       setShowAddForm(false);
+      fetchTransactions();
+    }
+  };
+
+  // Hapus transaksi
+  const handleDelete = async (id: number) => {
+    if (!confirm('Yakin ingin menghapus catatan ini?')) return;
+
+    const { error } = await supabase.from('transactions').delete().eq('id', id);
+    if (!error) {
+      fetchTransactions();
+    }
+  };
+
+  // Masuk ke mode edit transaksi
+  const startEditing = (t: Transaction) => {
+    setEditingId(t.id);
+    setEditTitle(t.title);
+    setEditAmount(t.amount.toString());
+    setEditCategory(t.category);
+    setEditDate(t.date);
+  };
+
+  // Simpan hasil edit
+  const handleUpdate = async (e: React.FormEvent, id: number) => {
+    e.preventDefault();
+    if (!editTitle || !editAmount) return;
+
+    const { error } = await supabase
+      .from('transactions')
+      .update({
+        title: editTitle,
+        amount: Number(editAmount),
+        category: editCategory,
+        date: editDate,
+      })
+      .eq('id', id);
+
+    if (!error) {
+      setEditingId(null);
       fetchTransactions();
     }
   };
@@ -285,15 +333,88 @@ export default function Home() {
           transactions.map((t) => (
             <div
               key={t.id}
-              className="flex justify-between items-center bg-slate-900 border border-slate-800 px-4 py-3 rounded-2xl"
+              className="bg-slate-900 border border-slate-800 p-3.5 rounded-2xl space-y-2.5 transition"
             >
-              <div>
-                <p className="font-semibold text-xs text-slate-200">{t.title}</p>
-                <p className="text-[10px] text-slate-500 mt-0.5">{t.category} • {t.date}</p>
-              </div>
-              <p className="text-xs font-bold text-rose-400">
-                -Rp {Number(t.amount).toLocaleString('id-ID')}
-              </p>
+              {editingId === t.id ? (
+                /* Formulir Edit inline */
+                <form onSubmit={(e) => handleUpdate(e, t.id)} className="space-y-2 pt-1">
+                  <input
+                    type="text"
+                    value={editTitle}
+                    onChange={(e) => setEditTitle(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-700 text-white px-2.5 py-1.5 rounded-xl text-xs focus:outline-none focus:border-blue-500"
+                  />
+                  <div className="grid grid-cols-2 gap-2">
+                    <input
+                      type="number"
+                      value={editAmount}
+                      onChange={(e) => setEditAmount(e.target.value)}
+                      className="bg-slate-950 border border-slate-700 text-white px-2.5 py-1.5 rounded-xl text-xs focus:outline-none focus:border-blue-500"
+                    />
+                    <select
+                      value={editCategory}
+                      onChange={(e) => setEditCategory(e.target.value)}
+                      className="bg-slate-950 border border-slate-700 text-slate-200 px-2 py-1.5 rounded-xl text-xs focus:outline-none focus:border-blue-500"
+                    >
+                      <option value="Makanan">Makanan</option>
+                      <option value="Transport">Transport</option>
+                      <option value="Hiburan">Hiburan</option>
+                      <option value="Tagihan">Tagihan</option>
+                    </select>
+                  </div>
+                  <input
+                    type="date"
+                    value={editDate}
+                    onChange={(e) => setEditDate(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-700 text-slate-200 px-2.5 py-1.5 rounded-xl text-xs focus:outline-none focus:border-blue-500"
+                  />
+                  <div className="flex justify-end gap-1.5 pt-1">
+                    <button
+                      type="button"
+                      onClick={() => setEditingId(null)}
+                      className="text-[11px] bg-slate-800 hover:bg-slate-700 text-slate-300 px-3 py-1 rounded-xl transition"
+                    >
+                      Batal
+                    </button>
+                    <button
+                      type="submit"
+                      className="text-[11px] bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-1 rounded-xl font-semibold transition"
+                    >
+                      Simpan
+                    </button>
+                  </div>
+                </form>
+              ) : (
+                /* Tampilan Baris Normal dengan Tombol Edit & Hapus */
+                <div className="flex justify-between items-center">
+                  <div>
+                    <p className="font-semibold text-xs text-slate-200">{t.title}</p>
+                    <p className="text-[10px] text-slate-500 mt-0.5">{t.category} • {t.date}</p>
+                  </div>
+
+                  <div className="flex items-center gap-3">
+                    <p className="text-xs font-bold text-rose-400">
+                      -Rp {Number(t.amount).toLocaleString('id-ID')}
+                    </p>
+                    <div className="flex items-center gap-1 pl-1 border-l border-slate-800">
+                      <button
+                        onClick={() => startEditing(t)}
+                        title="Edit transaksi"
+                        className="text-[11px] text-slate-400 hover:text-blue-400 px-1.5 py-1 rounded-lg hover:bg-slate-800 transition"
+                      >
+                        ✎
+                      </button>
+                      <button
+                        onClick={() => handleDelete(t.id)}
+                        title="Hapus transaksi"
+                        className="text-[11px] text-slate-400 hover:text-rose-400 px-1.5 py-1 rounded-lg hover:bg-slate-800 transition"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
           ))
         )}
